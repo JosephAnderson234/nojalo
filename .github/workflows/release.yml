@@ -1,0 +1,65 @@
+name: Release
+
+# Al empujar un tag vX.Y.Z se compilan los instaladores para Windows,
+# macOS y Linux y se publican en GitHub Releases.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows-latest
+          - platform: macos-latest # Apple Silicon
+          - platform: ubuntu-22.04
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Dependencias de sistema (Linux)
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Instalar trunk
+        uses: taiki-e/install-action@v2
+        with:
+          tool: trunk
+
+      - name: Tests del motor
+        run: cargo test -p nojalo-core
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tauriScript: npx --yes @tauri-apps/cli@2
+          tagName: ${{ github.ref_name }}
+          releaseName: Nojalo ${{ github.ref_name }}
+          releaseBody: |
+            Descarga el instalador de tu sistema:
+            - **Windows**: `Nojalo_*_x64-setup.exe`
+            - **macOS** (Apple Silicon): `Nojalo_*_aarch64.dmg`
+            - **Linux**: `.AppImage`, `.deb` o `.rpm`
+
+            Los binarios no están firmados: en Windows elige *Más información → Ejecutar de todas formas*; en macOS, clic derecho → *Abrir*.
+          releaseDraft: false
+          prerelease: false

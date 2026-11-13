@@ -10,6 +10,12 @@ App de escritorio para registrar calificaciones, escrita **toda en Rust**:
 
 El mismo crate `nojalo-core` corre en WASM (UI) y en nativo (backend/tests).
 
+## Descarga
+
+Instaladores para Windows, macOS y Linux en [Releases](https://github.com/JosephAnderson234/nojalo/releases/latest). No están firmados: en Windows elige *Más información → Ejecutar de todas formas*.
+
+Para publicar una versión: sube `version` en `src-tauri/tauri.conf.json` y empuja un tag `vX.Y.Z`; el workflow `release.yml` compila y publica los instaladores.
+
 ## Modelo
 
 Un curso es un **árbol**. Cada nodo es una *nota* o un *grupo* (los grupos pueden contener otros grupos).
