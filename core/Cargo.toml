@@ -1,5 +1,5 @@
 [package]
-name = "libreta-core"
+name = "nojalo-core"
 version = "0.1.0"
 edition = "2021"
 description = "Motor de calificaciones: árbol de notas con pesos, candados y eliminación de menores"

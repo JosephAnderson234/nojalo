@@ -1,7 +1,7 @@
 //! Persistencia: comandos de Tauri (SQLite) o, fuera de Tauri (`trunk serve`
 //! en un navegador), localStorage como respaldo para desarrollo.
 
-use libreta_core::Curso;
+use nojalo_core::Curso;
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
 
@@ -26,7 +26,7 @@ fn error(e: JsValue) -> String {
     e.as_string().unwrap_or_else(|| format!("{e:?}"))
 }
 
-const CLAVE: &str = "libreta.cursos";
+const CLAVE: &str = "nojalo.cursos";
 
 fn local() -> Option<web_sys::Storage> {
     web_sys::window()?.local_storage().ok()?

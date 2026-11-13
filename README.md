@@ -1,4 +1,6 @@
-# Libreta
+# Nojalo
+
+> ¿Cuánto necesito en el final para no jalar el curso?
 
 App de escritorio para registrar calificaciones, escrita **toda en Rust**:
 
@@ -6,7 +8,7 @@ App de escritorio para registrar calificaciones, escrita **toda en Rust**:
 - **`src/`**: la UI en [Leptos](https://leptos.dev) (reactividad fina), compilada a WebAssembly con [Trunk](https://trunkrs.dev).
 - **`src-tauri/`**: el shell de escritorio en [Tauri 2](https://tauri.app). Guarda los cursos en SQLite.
 
-El mismo crate `libreta-core` corre en WASM (UI) y en nativo (backend/tests).
+El mismo crate `nojalo-core` corre en WASM (UI) y en nativo (backend/tests).
 
 ## Modelo
 
@@ -42,8 +44,8 @@ En Windows funcionan las toolchains `-gnu` (MinGW/MSYS2) y `-msvc` (requiere VS 
 ```sh
 cargo tauri dev          # app de escritorio con recarga en caliente
 trunk serve              # solo la UI en http://localhost:1420 (guarda en localStorage)
-cargo test -p libreta-core
+cargo test -p nojalo-core
 cargo tauri build        # instalador
 ```
 
-Los datos se guardan en `%APPDATA%/app.libreta.notas/libreta.db` en Windows (en macOS y Linux, en la carpeta de datos equivalente).
+Los datos se guardan en `%APPDATA%/app.nojalo/nojalo.db` en Windows (en macOS y Linux, en la carpeta de datos equivalente).

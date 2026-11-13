@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Libreta",
+  "productName": "Nojalo",
   "version": "0.1.0",
-  "identifier": "app.libreta.notas",
+  "identifier": "app.nojalo",
   "build": {
     "beforeDevCommand": "trunk serve",
     "devUrl": "http://localhost:1420",
@@ -13,7 +13,7 @@
     "withGlobalTauri": true,
     "windows": [
       {
-        "title": "Libreta",
+        "title": "Nojalo",
         "width": 1280,
         "height": 820,
         "minWidth": 900,

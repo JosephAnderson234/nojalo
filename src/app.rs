@@ -1,6 +1,6 @@
 use leptos::prelude::*;
 use leptos::task::spawn_local;
-use libreta_core::*;
+use nojalo_core::*;
 
 use crate::api;
 
@@ -172,7 +172,7 @@ fn Bienvenida() -> impl IntoView {
     let app = expect_context::<Global>();
     view! {
         <div class="bienvenida">
-            <h1>"Libreta"</h1>
+            <h1>"Nojalo"</h1>
             <p>
                 "Registra tus notas como un árbol: grupos dentro de grupos, pesos relativos al grupo o a la nota final, "
                 "candados de nota mínima y eliminación de las notas más bajas."
@@ -224,7 +224,7 @@ fn Barra() -> impl IntoView {
         <aside class="barra">
             <div class="marca">
                 <span class="logo">"▦"</span>
-                "Libreta"
+                "Nojalo"
             </div>
             <div class="fila-botones">
                 <button

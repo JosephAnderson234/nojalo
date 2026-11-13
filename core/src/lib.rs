@@ -1,4 +1,4 @@
-//! Motor de calificaciones de Libreta.
+//! Motor de calificaciones de Nojalo.
 //!
 //! Un [`Curso`] es un árbol: los [`Nodo`]s son notas o grupos, cada uno con un
 //! [`Peso`] (automático, % del grupo o % de la nota final), un [`Candado`]

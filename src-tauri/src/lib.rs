@@ -1,9 +1,9 @@
 //! Backend de escritorio: guarda cada curso como un documento JSON en SQLite.
-//! Toda la lógica de notas vive en `libreta-core` y se ejecuta en el frontend.
+//! Toda la lógica de notas vive en `nojalo-core` y se ejecuta en el frontend.
 
 use std::sync::Mutex;
 
-use libreta_core::Curso;
+use nojalo_core::Curso;
 use rusqlite::{params, Connection};
 use tauri::{Manager, State};
 
@@ -62,12 +62,12 @@ pub fn run() {
         .setup(|app| {
             let dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&dir)?;
-            let con = Connection::open(dir.join("libreta.db"))?;
+            let con = Connection::open(dir.join("nojalo.db"))?;
             con.execute_batch(ESQUEMA)?;
             app.manage(Db(Mutex::new(con)));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![listar_cursos, guardar_curso, eliminar_curso])
         .run(tauri::generate_context!())
-        .expect("error al iniciar Libreta");
+        .expect("error al iniciar Nojalo");
 }
