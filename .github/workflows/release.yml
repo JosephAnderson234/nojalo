@@ -1,7 +1,7 @@
 name: Release
 
-# Al empujar un tag vX.Y.Z se compilan los instaladores para Windows,
-# macOS y Linux y se publican en GitHub Releases.
+# Al empujar un tag vX.Y.Z se compilan los instaladores para Windows
+# y Linux y se publican en GitHub Releases.
 on:
   push:
     tags: ["v*"]
@@ -16,7 +16,6 @@ jobs:
       matrix:
         include:
           - platform: windows-latest
-          - platform: macos-latest # Apple Silicon
           - platform: ubuntu-22.04
     runs-on: ${{ matrix.platform }}
 
@@ -57,9 +56,8 @@ jobs:
           releaseBody: |
             Descarga el instalador de tu sistema:
             - **Windows**: `Nojalo_*_x64-setup.exe`
-            - **macOS** (Apple Silicon): `Nojalo_*_aarch64.dmg`
             - **Linux**: `.AppImage`, `.deb` o `.rpm`
 
-            Los binarios no están firmados: en Windows elige *Más información → Ejecutar de todas formas*; en macOS, clic derecho → *Abrir*.
+            Los binarios no están firmados: en Windows elige *Más información → Ejecutar de todas formas*.
           releaseDraft: false
           prerelease: false

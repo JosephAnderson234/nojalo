@@ -12,7 +12,7 @@ El mismo crate `nojalo-core` corre en WASM (UI) y en nativo (backend/tests).
 
 ## Descarga
 
-Instaladores para Windows, macOS y Linux en [Releases](https://github.com/JosephAnderson234/nojalo/releases/latest). No están firmados: en Windows elige *Más información → Ejecutar de todas formas*.
+Instaladores para Windows y Linux en [Releases](https://github.com/JosephAnderson234/nojalo/releases/latest). No están firmados: en Windows elige *Más información → Ejecutar de todas formas*.
 
 Para publicar una versión: sube `version` en `src-tauri/tauri.conf.json` y empuja un tag `vX.Y.Z`; el workflow `release.yml` compila y publica los instaladores.
 
@@ -54,4 +54,4 @@ cargo test -p nojalo-core
 cargo tauri build        # instalador
 ```
 
-Los datos se guardan en `%APPDATA%/app.nojalo/nojalo.db` en Windows (en macOS y Linux, en la carpeta de datos equivalente).
+Los datos se guardan en `%APPDATA%/app.nojalo/nojalo.db` en Windows (en Linux, en `~/.local/share/app.nojalo/`).
