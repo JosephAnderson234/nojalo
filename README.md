@@ -34,7 +34,29 @@ Para cada curso se calcula:
 - **Rango posible**: el peor caso (lo pendiente vale 0) y el mejor caso (lo pendiente vale el máximo).
 - **Nota necesaria**: el promedio que hace falta en todo lo pendiente para aprobar. Se obtiene por bisección, porque la nota final es monótona.
 - **Simulador**: «si saco X en lo que falta, termino con Y».
-- **Ponderado por créditos** de cada periodo.
+## Ciclos
+
+Los cursos se agrupan por **ciclo** (por ejemplo `2026-2`). Al hacer clic en un ciclo de la barra lateral se abre su resumen:
+
+- **Promedio ponderado**: `Σ(nota × créditos) / Σ créditos`. Solo cuentan los cursos que ya tienen alguna nota, con su nota actual. Los cursos de 0 créditos no pesan.
+- **Proyección**: el ponderado en el peor y en el mejor caso, contando todos los cursos.
+- Créditos asegurados, jalados y en juego. Los créditos se pueden editar desde la tabla.
+- Para renombrar el ciclo se edita su título; el cambio se aplica a todos sus cursos.
+
+Al pie de la barra lateral se muestra el **promedio acumulado** de todos los ciclos.
+
+## Esquemas (exportar e importar)
+
+Un **esquema** es la estructura de un curso **sin notas**: evaluaciones, grupos, pesos, candados, eliminación de menores, créditos, escala y nota aprobatoria. Sirve para compartir con compañeros cómo se califica un curso.
+
+| Acción | Dónde |
+|---|---|
+| Exportar el esquema de un curso | Botón *Exportar esquema* en el curso (`<curso>.esquema.json`) |
+| Exportar todos los esquemas de un ciclo | Botón *Exportar esquemas* en la vista del ciclo (`ciclo-<x>.esquemas.json`) |
+| Crear cursos desde un archivo | Botón de importar de la barra lateral, de la vista del ciclo o de la pantalla de bienvenida |
+| Reemplazar la estructura de un curso | *Aplicar esquema* en el curso (pide confirmación: se borran las notas) |
+
+Formato: JSON con `"formato": "nojalo/esquema"` (un curso) o `"nojalo/paquete"` (varios), y `"version": 1`. Al importar también se acepta el JSON interno de un curso: se le quitan las notas. Antes de crear nada, los archivos se validan: escala, nota aprobatoria, pesos y candados.
 
 ## Requisitos
 

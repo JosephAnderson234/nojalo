@@ -11,7 +11,13 @@ use crate::iconos::Icono;
 struct Global {
     cursos: RwSignal<Vec<Curso>>,
     sel: RwSignal<Option<String>>,
+    /// Ciclo abierto en la vista de ciclo; si hay uno, tiene prioridad sobre el curso.
+    ciclo: RwSignal<Option<String>>,
     error: RwSignal<Option<String>>,
+    /// Aviso de que algo salió bien (se cierra solo).
+    aviso: RwSignal<Option<String>>,
+    /// Diálogo de confirmación abierto.
+    confirmacion: RwSignal<Option<Confirmacion>>,
     /// Guardados en curso (para el indicador «Guardando…»).
     guardando: RwSignal<u32>,
     /// Si ya se guardó algo en esta sesión (para mostrar «Guardado»).
@@ -30,6 +36,20 @@ impl Global {
             }
         });
         if let Some(c) = copia {
+            self.guardar(c);
+        }
+    }
+
+    /// Aplica un cambio a todos los cursos que cumplen `pred` y los persiste.
+    fn editar_donde(&self, pred: impl Fn(&Curso) -> bool, f: impl Fn(&mut Curso)) {
+        let mut cambiados = vec![];
+        self.cursos.update(|v| {
+            for c in v.iter_mut().filter(|c| pred(c)) {
+                f(c);
+                cambiados.push(c.clone());
+            }
+        });
+        for c in cambiados {
             self.guardar(c);
         }
     }
@@ -56,9 +76,114 @@ impl Global {
     }
 
     fn crear(&self, c: Curso) {
+        self.ciclo.set(None);
         self.sel.set(Some(c.id.clone()));
         self.cursos.update(|v| v.push(c.clone()));
         self.guardar(c);
+    }
+
+    /// Muestra el diálogo de confirmación; `accion` corre solo si se acepta.
+    fn confirmar(
+        &self,
+        titulo: &str,
+        mensaje: String,
+        boton: &'static str,
+        accion: impl Fn() + Send + Sync + 'static,
+    ) {
+        self.confirmacion.set(Some(Confirmacion {
+            titulo: titulo.into(),
+            mensaje,
+            boton,
+            accion: Callback::new(move |()| accion()),
+        }));
+    }
+
+    fn eliminar_curso(&self, id: String) {
+        self.cursos.update(|v| v.retain(|x| x.id != id));
+        if self.sel.get_untracked().as_deref() == Some(id.as_str()) {
+            self.sel.set(self.cursos.with_untracked(|v| v.first().map(|c| c.id.clone())));
+        }
+        let Global { error, aviso, .. } = *self;
+        spawn_local(async move {
+            match api::eliminar(&id).await {
+                Ok(()) => aviso.set(Some("Curso eliminado.".into())),
+                Err(e) => error.set(Some(format!("No se pudo eliminar el curso: {e}"))),
+            }
+        });
+    }
+
+    /// Mueve todos los cursos de `viejo` a `nuevo` y abre el ciclo resultante.
+    fn renombrar_ciclo(&self, viejo: String, nuevo: String) {
+        self.editar_donde(|c| c.periodo == viejo, |c| c.periodo = nuevo.clone());
+        self.abrir_ciclo(nuevo);
+    }
+
+    /// Abre un ciclo vacío con el nombre que sigue al más reciente.
+    fn nuevo_ciclo(&self) {
+        let existentes = self.cursos.with_untracked(|v| ciclos(v));
+        self.abrir_ciclo(ciclo_siguiente(&existentes, &periodo_actual()));
+    }
+
+    fn abrir_curso(&self, id: String) {
+        self.ciclo.set(None);
+        self.sel.set(Some(id));
+    }
+
+    fn abrir_ciclo(&self, ciclo: String) {
+        self.ciclo.set(Some(ciclo));
+    }
+
+    /// Ciclo donde caen los cursos nuevos: el ciclo abierto, el del curso
+    /// abierto o, si no hay ninguno, el semestre actual.
+    fn ciclo_destino(&self) -> String {
+        if let Some(c) = self.ciclo.get_untracked() {
+            return c;
+        }
+        let sel = self.sel.get_untracked();
+        self.cursos
+            .with_untracked(|v| v.iter().find(|c| Some(&c.id) == sel.as_ref()).map(|c| c.periodo.clone()))
+            .unwrap_or_else(periodo_actual)
+    }
+
+    /// Crea cursos (sin notas) a partir de los esquemas de un archivo.
+    fn importar(&self, texto: &str, ciclo: String) {
+        let esquemas = match leer_esquemas(texto) {
+            Ok(e) => e,
+            Err(e) => return self.error.set(Some(format!("No se pudo importar: {e}"))),
+        };
+        let base = nuevo_id();
+        let nuevos: Vec<Curso> = esquemas
+            .into_iter()
+            .enumerate()
+            .map(|(i, e)| Curso::desde_esquema(format!("{base}{i}"), &ciclo, e))
+            .collect();
+        let n = nuevos.len();
+        let primero = nuevos[0].id.clone();
+        self.cursos.update(|v| v.extend(nuevos.iter().cloned()));
+        for c in nuevos {
+            self.guardar(c);
+        }
+        let donde = if ciclo.is_empty() { "sin ciclo".to_string() } else { format!("en {ciclo}") };
+        if n == 1 {
+            self.abrir_curso(primero);
+            self.aviso.set(Some(format!("Esquema importado {donde}. Ya puedes registrar tus notas.")));
+        } else {
+            self.sel.set(Some(primero));
+            self.abrir_ciclo(ciclo);
+            self.aviso.set(Some(format!("{n} esquemas importados {donde}.")));
+        }
+    }
+
+    /// Guarda un archivo (diálogo nativo en escritorio, descarga en el navegador).
+    fn exportar(&self, nombre: String, contenido: String) {
+        let Global { error, aviso, .. } = *self;
+        spawn_local(async move {
+            match api::exportar(&nombre, &contenido).await {
+                Ok(true) => aviso.set(Some("Esquema exportado.".into())),
+                Ok(false) => {}
+                Err(e) => error.set(Some(format!("No se pudo exportar: {e}"))),
+            }
+        });
     }
 }
 
@@ -107,8 +232,16 @@ fn periodo_actual() -> String {
     format!("{}-{}", d.get_full_year(), if d.get_month() < 6 { 1 } else { 2 })
 }
 
-fn confirmar(msg: &str) -> bool {
-    web_sys::window().and_then(|w| w.confirm_with_message(msg).ok()).unwrap_or(true)
+/// Pregunta pendiente del diálogo de confirmación de la app.
+///
+/// No se usa `window.confirm`: en Tauri el plugin de diálogos lo reemplaza por
+/// una versión asíncrona que, llamada de forma síncrona, siempre devuelve `false`.
+#[derive(Clone)]
+struct Confirmacion {
+    titulo: String,
+    mensaje: String,
+    boton: &'static str,
+    accion: Callback<()>,
 }
 
 /// Campo numérico que confirma al salir del input o con Enter.
@@ -159,7 +292,10 @@ pub fn App() -> impl IntoView {
     let app = Global {
         cursos: RwSignal::new(vec![]),
         sel: RwSignal::new(None),
+        ciclo: RwSignal::new(None),
         error: RwSignal::new(None),
+        aviso: RwSignal::new(None),
+        confirmacion: RwSignal::new(None),
         guardando: RwSignal::new(0),
         guardado: RwSignal::new(false),
     };
@@ -179,6 +315,19 @@ pub fn App() -> impl IntoView {
         }
     });
 
+    Effect::new(move |_| {
+        if let Some(a) = app.aviso.get() {
+            set_timeout(
+                move || {
+                    if app.aviso.get_untracked().as_deref() == Some(a.as_str()) {
+                        app.aviso.set(None);
+                    }
+                },
+                std::time::Duration::from_secs(4),
+            );
+        }
+    });
+
     spawn_local(async move {
         match api::listar().await {
             Ok(v) => {
@@ -193,11 +342,31 @@ pub fn App() -> impl IntoView {
         <div class="app">
             <Barra />
             <main class="principal">
-                {move || match app.sel.get() {
-                    Some(_) => view! { <Editor /> }.into_any(),
-                    None => view! { <Bienvenida /> }.into_any(),
+                {move || match (app.ciclo.get(), app.sel.get()) {
+                    (Some(c), _) => view! { <VistaCiclo ciclo=c /> }.into_any(),
+                    (None, Some(_)) => view! { <Editor /> }.into_any(),
+                    (None, None) => view! { <Bienvenida /> }.into_any(),
                 }}
             </main>
+            <Dialogo />
+            <div class="pila-avisos">
+            <div class="avisos" role="status" aria-live="polite">
+                {move || {
+                    app.aviso
+                        .get()
+                        .map(|a| {
+                            view! {
+                                <div class="toast info">
+                                    <Icono nombre="check" />
+                                    <span>{a}</span>
+                                    <button class="icono-btn" aria-label="Cerrar aviso" on:click=move |_| app.aviso.set(None)>
+                                        <Icono nombre="cerrar" />
+                                    </button>
+                                </div>
+                            }
+                        })
+                }}
+            </div>
             <div class="avisos" role="alert" aria-live="assertive">
                 {move || {
                     app.error
@@ -214,6 +383,7 @@ pub fn App() -> impl IntoView {
                             }
                         })
                 }}
+            </div>
             </div>
         </div>
     }
@@ -242,41 +412,159 @@ fn Bienvenida() -> impl IntoView {
                 <button on:click=move |_| app.crear(Curso::ejemplo(nuevo_id(), &periodo_actual()))>
                     "Ver un ejemplo"
                 </button>
+                <BotonImportar
+                    titulo="Crear cursos a partir de esquemas de calificación (.json)"
+                    al_leer=Callback::new(move |t: String| app.importar(&t, periodo_actual()))
+                >
+                    <Icono nombre="importar" />
+                    "Importar esquema"
+                </BotonImportar>
             </div>
         </div>
     }
 }
 
+// ───────────────────────── diálogo de confirmación ─────────────────────────
+
+#[component]
+fn Dialogo() -> impl IntoView {
+    let app = expect_context::<Global>();
+    let cancelar_ref = NodeRef::<leptos::html::Button>::new();
+    // Al abrirse, el foco va a «Cancelar» (la opción segura).
+    Effect::new(move |_| {
+        if let Some(b) = cancelar_ref.get() {
+            let _ = b.focus();
+        }
+    });
+    let cerrar = move || app.confirmacion.set(None);
+    let aceptar = move |_| {
+        if let Some(c) = app.confirmacion.get_untracked() {
+            app.confirmacion.set(None);
+            c.accion.run(());
+        }
+    };
+    let dato = move |f: fn(&Confirmacion) -> String| move || app.confirmacion.with(|c| c.as_ref().map(f).unwrap_or_default());
+
+    view! {
+        <Show when=move || app.confirmacion.with(|c| c.is_some())>
+            <div class="velo" on:click=move |_| cerrar()>
+                <div
+                    class="dialogo"
+                    role="alertdialog"
+                    aria-modal="true"
+                    aria-labelledby="dialogo-titulo"
+                    aria-describedby="dialogo-texto"
+                    on:click=|ev| ev.stop_propagation()
+                    on:keydown=move |ev| {
+                        if ev.key() == "Escape" {
+                            cerrar()
+                        }
+                    }
+                >
+                    <span class="dialogo-icono">
+                        <Icono nombre="alerta" tam=22 />
+                    </span>
+                    <h2 id="dialogo-titulo">{dato(|c| c.titulo.clone())}</h2>
+                    <p id="dialogo-texto">{dato(|c| c.mensaje.clone())}</p>
+                    <div class="dialogo-botones">
+                        <button node_ref=cancelar_ref on:click=move |_| cerrar()>
+                            "Cancelar"
+                        </button>
+                        <button class="peligro-fuerte" on:click=aceptar>
+                            {dato(|c| c.boton.to_string())}
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </Show>
+    }
+}
+
 // ───────────────────────── barra lateral ─────────────────────────
+
+fn nombre_ciclo(p: &str) -> String {
+    if p.is_empty() {
+        "Sin ciclo".into()
+    } else {
+        p.into()
+    }
+}
+
+/// Botón que abre el selector de archivos y entrega el texto del `.json` elegido.
+#[component]
+fn BotonImportar(
+    al_leer: Callback<String>,
+    #[prop(optional)] clase: &'static str,
+    #[prop(optional)] titulo: Option<&'static str>,
+    /// Nombre accesible para botones que solo muestran un icono.
+    #[prop(optional)]
+    etiqueta: Option<&'static str>,
+    children: Children,
+) -> impl IntoView {
+    let app = expect_context::<Global>();
+    let entrada = NodeRef::<leptos::html::Input>::new();
+    view! {
+        <button
+            class=clase
+            title=titulo
+            aria-label=etiqueta
+            on:click=move |_| {
+                if let Some(i) = entrada.get() {
+                    i.click()
+                }
+            }
+        >
+            {children()}
+        </button>
+        <input
+            type="file"
+            accept=".json,application/json"
+            class="oculto"
+            tabindex="-1"
+            aria-hidden="true"
+            node_ref=entrada
+            on:change=move |ev| {
+                let input: web_sys::HtmlInputElement = event_target(&ev);
+                let archivo = input.files().and_then(|f| f.get(0));
+                input.set_value("");
+                if let Some(a) = archivo {
+                    spawn_local(async move {
+                        match api::leer_archivo(a).await {
+                            Ok(t) => al_leer.run(t),
+                            Err(e) => app.error.set(Some(format!("No se pudo leer el archivo: {e}"))),
+                        }
+                    });
+                }
+            }
+        />
+    }
+}
 
 #[component]
 fn Barra() -> impl IntoView {
     let app = expect_context::<Global>();
 
-    let periodos = move || {
+    let grupos = move || {
         app.cursos.with(|v| {
-            let mut ps: Vec<String> = v.iter().map(|c| c.periodo.clone()).collect();
-            ps.sort_by(|a, b| b.cmp(a));
-            ps.dedup();
-            ps.into_iter()
+            let mut lista = ciclos(v);
+            // Un ciclo recién creado no tiene cursos todavía: se muestra mientras está abierto.
+            if let Some(abierto) = app.ciclo.get() {
+                lista.push(abierto);
+                ordenar_ciclos(&mut lista);
+            }
+            lista
+                .into_iter()
                 .map(|p| {
-                    let cursos: Vec<&Curso> = v.iter().filter(|c| c.periodo == p).collect();
-                    let pond = ponderado(cursos.iter().copied());
-                    let items: Vec<(String, String, Option<f64>, Estado, u8, f64)> = cursos
-                        .iter()
-                        .map(|c| {
-                            let i = informe(c);
-                            (c.id.clone(), c.nombre.clone(), i.actual, i.estado, c.decimales, c.escala_max)
-                        })
-                        .collect();
-                    (p, pond, items)
+                    let r = resumen_ciclo(cursos_del_ciclo(v, &p));
+                    (p, r)
                 })
                 .collect::<Vec<_>>()
         })
     };
+    let acumulado = Memo::new(move |_| app.cursos.with(|v| resumen_ciclo(v.iter())));
 
     view! {
-        <aside class="barra" aria-label="Cursos">
+        <aside class="barra" aria-label="Cursos y ciclos">
             <div class="marca">
                 <span class="logo">
                     <Icono nombre="logo" tam=20 />
@@ -286,65 +574,343 @@ fn Barra() -> impl IntoView {
             <div class="fila-botones">
                 <button
                     class="primario"
-                    on:click=move |_| app.crear(Curso::nuevo(nuevo_id(), "Nuevo curso", &periodo_actual()))
+                    on:click=move |_| app.crear(Curso::nuevo(nuevo_id(), "Nuevo curso", &app.ciclo_destino()))
                 >
                     <Icono nombre="mas" />
                     "Curso"
                 </button>
                 <button
-                    title="Agrega un curso de ejemplo con todas las reglas"
-                    on:click=move |_| app.crear(Curso::ejemplo(nuevo_id(), &periodo_actual()))
+                    class="icono-solo"
+                    title="Agregar un curso de ejemplo con todas las reglas"
+                    aria-label="Agregar un curso de ejemplo"
+                    on:click=move |_| app.crear(Curso::ejemplo(nuevo_id(), &app.ciclo_destino()))
                 >
                     <Icono nombre="libro" />
-                    "Ejemplo"
+                </button>
+                <BotonImportar
+                    clase="icono-solo"
+                    titulo="Importar esquemas de calificación (.json)"
+                    etiqueta="Importar esquemas"
+                    al_leer=Callback::new(move |t: String| app.importar(&t, app.ciclo_destino()))
+                >
+                    <Icono nombre="importar" />
+                </BotonImportar>
+            </div>
+            <div class="ciclos-titulo">
+                <span>"Ciclos"</span>
+                <button class="mini-btn" title="Crear un ciclo nuevo" on:click=move |_| app.nuevo_ciclo()>
+                    <Icono nombre="mas" tam=12 />
+                    "Ciclo"
                 </button>
             </div>
-            {move || {
-                periodos()
-                    .into_iter()
-                    .map(|(p, pond, items)| {
-                        view! {
-                            <section class="periodo">
-                                <header>
-                                    <span>{if p.is_empty() { "Sin periodo".to_string() } else { p }}</span>
-                                    <span class="pond" title="Promedio ponderado por créditos">
-                                        {pond.map(|x| fmt(x, 2)).unwrap_or_else(|| "—".into())}
-                                    </span>
-                                </header>
-                                {items
-                                    .into_iter()
-                                    .map(|(id, nombre, nota, estado, dec, escala)| {
-                                        let id2 = id.clone();
-                                        let (clase, texto_estado) = match estado {
-                                            Estado::Aprobado => ("ok", "aprobado"),
-                                            Estado::Desaprobado => ("mal", "jalado"),
-                                            Estado::EnJuego => ("juego", "en juego"),
-                                        };
-                                        let activo = move || app.sel.get().as_deref() == Some(id.as_str());
-                                        view! {
-                                            <button
-                                                class="curso-item"
-                                                class:activo=activo.clone()
-                                                aria-current=move || activo().then_some("page")
-                                                title=format!("{nombre} ({texto_estado})")
-                                                on:click=move |_| app.sel.set(Some(id2.clone()))
-                                            >
-                                                {mini_anillo(nota.map_or(0.0, |x| x / escala), clase)}
-                                                <span class="sr">{format!("{texto_estado}: ")}</span>
-                                                <span class="nombre">{nombre.clone()}</span>
-                                                <span class="nota">
-                                                    {nota.map(|x| fmt(x, dec)).unwrap_or_else(|| "—".into())}
-                                                </span>
-                                            </button>
-                                        }
-                                    })
-                                    .collect_view()}
-                            </section>
-                        }
-                    })
-                    .collect_view()
-            }}
+            <nav class="ciclos" aria-label="Ciclos">
+                {move || {
+                    grupos()
+                        .into_iter()
+                        .map(|(p, r)| {
+                            let p_activo = p.clone();
+                            let p_click = p.clone();
+                            let ciclo_activo = move || app.ciclo.get().as_deref() == Some(p_activo.as_str());
+                            view! {
+                                <section class="periodo">
+                                    <button
+                                        class="ciclo-cabecera"
+                                        class:activo=ciclo_activo.clone()
+                                        aria-current=move || ciclo_activo().then_some("page")
+                                        title="Ver el promedio ponderado del ciclo"
+                                        on:click=move |_| app.abrir_ciclo(p_click.clone())
+                                    >
+                                        <Icono nombre="ciclo" tam=13 />
+                                        <span class="ciclo-nombre">{nombre_ciclo(&p)}</span>
+                                        <span class="pond">
+                                            {r.ponderado.map(|x| fmt(x, 2)).unwrap_or_else(|| "—".into())}
+                                        </span>
+                                    </button>
+                                    {r
+                                        .cursos
+                                        .into_iter()
+                                        .map(|c| {
+                                            let id = c.id.clone();
+                                            let id_click = c.id.clone();
+                                            let (clase, texto_estado) = match c.estado {
+                                                Estado::Aprobado => ("ok", "aprobado"),
+                                                Estado::Desaprobado => ("mal", "jalado"),
+                                                Estado::EnJuego => ("juego", "en juego"),
+                                            };
+                                            let activo = move || {
+                                                app.ciclo.get().is_none() && app.sel.get().as_deref() == Some(id.as_str())
+                                            };
+                                            view! {
+                                                <button
+                                                    class="curso-item"
+                                                    class:activo=activo.clone()
+                                                    aria-current=move || activo().then_some("page")
+                                                    title=format!("{} ({texto_estado})", c.nombre)
+                                                    on:click=move |_| app.abrir_curso(id_click.clone())
+                                                >
+                                                    {mini_anillo(c.nota.map_or(0.0, |x| x / c.escala_max), clase)}
+                                                    <span class="sr">{format!("{texto_estado}: ")}</span>
+                                                    <span class="nombre">{c.nombre.clone()}</span>
+                                                    <span class="nota">
+                                                        {c.nota.map(|x| fmt(x, c.decimales)).unwrap_or_else(|| "—".into())}
+                                                    </span>
+                                                </button>
+                                            }
+                                        })
+                                        .collect_view()}
+                                </section>
+                            }
+                        })
+                        .collect_view()
+                }}
+            </nav>
+            <Show when=move || acumulado.with(|r| !r.cursos.is_empty())>
+                <div class="acumulado" title="Σ(nota × créditos) / Σ créditos de todos tus ciclos">
+                    <span class="rotulo">"Promedio acumulado"</span>
+                    <span class="cifra-acum">
+                        {move || acumulado.with(|r| r.ponderado.map(|x| fmt(x, 2)).unwrap_or_else(|| "—".into()))}
+                    </span>
+                    <span class="sub">
+                        {move || {
+                            acumulado
+                                .with(|r| {
+                                    format!(
+                                        "{} créditos con nota · {} asegurados",
+                                        corto(r.creditos_con_nota),
+                                        corto(r.creditos_aprobados),
+                                    )
+                                })
+                        }}
+                    </span>
+                </div>
+            </Show>
         </aside>
+    }
+}
+
+// ───────────────────────── vista de ciclo ─────────────────────────
+
+#[component]
+fn VistaCiclo(ciclo: String) -> impl IntoView {
+    let app = expect_context::<Global>();
+    let nombre = StoredValue::new(ciclo.clone());
+    let resumen = Memo::new(move |_| {
+        let c = nombre.get_value();
+        app.cursos.with(|v| resumen_ciclo(cursos_del_ciclo(v, &c)))
+    });
+    let r = move |f: fn(&ResumenCiclo) -> String| move || resumen.with(f);
+    let ponderado = move || resumen.with(|r| r.ponderado.map(|x| fmt(x, 2)).unwrap_or_else(|| "—".into()));
+
+    let exportar_ciclo = move |_| {
+        let c = nombre.get_value();
+        let json = app.cursos.with_untracked(|v| paquete(&c, cursos_del_ciclo(v, &c)).a_json());
+        app.exportar(api::nombre_archivo(&format!("ciclo {}", nombre_ciclo(&c)), ".esquemas.json"), json);
+    };
+
+    view! {
+        <div class="editor ciclo-vista">
+            <header class="cabecera">
+                <div class="linea-titulo">
+                    <span class="icono-titulo">
+                        <Icono nombre="ciclo" tam=22 />
+                    </span>
+                    <input
+                        class="titulo"
+                        aria-label="Nombre del ciclo"
+                        placeholder="Sin ciclo"
+                        prop:value=ciclo.clone()
+                        on:change=move |ev| {
+                            let campo: web_sys::HtmlInputElement = event_target(&ev);
+                            let nuevo = campo.value().trim().to_string();
+                            let viejo = nombre.get_value();
+                            if nuevo == viejo {
+                                return;
+                            }
+                            let existe = app.cursos.with_untracked(|v| v.iter().any(|c| c.periodo == nuevo));
+                            if existe {
+                                campo.set_value(&viejo);
+                                let mensaje = format!(
+                                    "Ya existe el ciclo «{}». Los cursos de «{}» pasarán a ese ciclo.",
+                                    nombre_ciclo(&nuevo),
+                                    nombre_ciclo(&viejo),
+                                );
+                                app.confirmar("¿Juntar ciclos?", mensaje, "Juntar", move || {
+                                    app.renombrar_ciclo(viejo.clone(), nuevo.clone())
+                                });
+                            } else {
+                                app.renombrar_ciclo(viejo, nuevo);
+                            }
+                        }
+                    />
+                    <div class="acciones-curso">
+                        <button on:click=move |_| app.crear(Curso::nuevo(nuevo_id(), "Nuevo curso", &nombre.get_value()))>
+                            <Icono nombre="mas" tam=14 />
+                            "Curso"
+                        </button>
+                        <BotonImportar
+                            titulo="Crear cursos en este ciclo a partir de esquemas (.json)"
+                            al_leer=Callback::new(move |t: String| app.importar(&t, nombre.get_value()))
+                        >
+                            <Icono nombre="importar" tam=14 />
+                            "Importar"
+                        </BotonImportar>
+                        <button
+                            title="Guardar los esquemas (sin notas) de todos los cursos del ciclo en un archivo"
+                            disabled=move || resumen.with(|r| r.cursos.is_empty())
+                            on:click=exportar_ciclo
+                        >
+                            <Icono nombre="exportar" tam=14 />
+                            "Exportar esquemas"
+                        </button>
+                    </div>
+                </div>
+                <p class="meta">
+                    {r(|r| {
+                        let n = r.cursos.len();
+                        format!("{n} curso{} · {} créditos", if n == 1 { "" } else { "s" }, corto(r.creditos))
+                    })}
+                </p>
+            </header>
+
+            <section class="hero ciclo-hero">
+                <div class="pond-bloque">
+                    <span class="rotulo">"Promedio ponderado"</span>
+                    <span class="cifra">{ponderado}</span>
+                    <span class="pildora">
+                        {r(|r| format!("{} de {} créditos con nota", corto(r.creditos_con_nota), corto(r.creditos)))}
+                    </span>
+                </div>
+                <div class="hero-info">
+                    <div class="formula" role="math" aria-label="Promedio ponderado: suma de nota por créditos entre suma de créditos">
+                        <div class="fraccion">
+                            <span class="num-f">"Σ (nota × créditos)"</span>
+                            <span class="den-f">"Σ créditos"</span>
+                        </div>
+                        <span class="igual">"="</span>
+                        <div class="fraccion">
+                            <span class="num-f">{r(|r| corto(r.puntos))}</span>
+                            <span class="den-f">{r(|r| corto(r.creditos_con_nota))}</span>
+                        </div>
+                        <span class="igual">"="</span>
+                        <strong class="resultado">{ponderado}</strong>
+                    </div>
+                    <div class="kpis">
+                        <div class="kpi">
+                            <span class="rotulo">"Proyección"</span>
+                            <span class="valor-kpi">
+                                {r(|r| match (r.ponderado_minimo, r.ponderado_maximo) {
+                                    (Some(a), Some(b)) => format!("{} – {}", fmt(a, 2), fmt(b, 2)),
+                                    _ => "—".into(),
+                                })}
+                            </span>
+                            <span class="sub">"con 0 o el máximo en todo lo pendiente"</span>
+                        </div>
+                        <div class="kpi">
+                            <span class="rotulo">"Créditos asegurados"</span>
+                            <span class="valor-kpi">{r(|r| format!("{} / {}", corto(r.creditos_aprobados), corto(r.creditos)))}</span>
+                            <div class="barra-avance" aria-hidden="true">
+                                <i style:width=move || {
+                                    resumen.with(|r| {
+                                        let p = if r.creditos > 0.0 { r.creditos_aprobados / r.creditos } else { 0.0 };
+                                        format!("{:.1}%", p.clamp(0.0, 1.0) * 100.0)
+                                    })
+                                }></i>
+                            </div>
+                        </div>
+                        <div class="kpi">
+                            <span class="rotulo">"Créditos jalados"</span>
+                            <span class="valor-kpi">{r(|r| corto(r.creditos_jalados))}</span>
+                            <span class="sub">
+                                {r(|r| {
+                                    let en_juego = r.creditos - r.creditos_aprobados - r.creditos_jalados;
+                                    format!("{} en juego", corto(en_juego.max(0.0)))
+                                })}
+                            </span>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section class="tabla-ciclo" aria-label="Cursos del ciclo">
+                <div class="fila-ciclo encabezado" aria-hidden="true">
+                    <span>"Curso"</span>
+                    <span class="der">"Créditos"</span>
+                    <span class="der">"Nota"</span>
+                    <span class="der">"Nota × créditos"</span>
+                    <span class="centro-t col-rango">"Rango posible"</span>
+                    <span>"Estado"</span>
+                </div>
+                <Show when=move || resumen.with(|r| r.cursos.is_empty())>
+                    <p class="vacio">
+                        "Este ciclo aún no tiene cursos. Crea uno con «+ Curso» o importa los esquemas de tu malla; "
+                        "el ciclo se guarda al agregar su primer curso. Puedes cambiarle el nombre arriba."
+                    </p>
+                </Show>
+                <For
+                    each=move || resumen.with(|r| r.cursos.iter().map(|c| c.id.clone()).collect::<Vec<_>>())
+                    key=|id| id.clone()
+                    children=move |id| view! { <FilaCiclo id=id resumen=resumen /> }
+                />
+                <div class="fila-ciclo total">
+                    <span>"Total"</span>
+                    <span class="der" title="Σ créditos de los cursos con nota">{r(|r| corto(r.creditos_con_nota))}</span>
+                    <span></span>
+                    <span class="der" title="Σ (nota × créditos)">{r(|r| corto(r.puntos))}</span>
+                    <span class="col-rango"></span>
+                    <span class="fuerte">{ponderado}</span>
+                </div>
+            </section>
+            <p class="nota-al-pie">
+                "Solo cuentan los cursos que ya tienen alguna nota (con su nota actual); los de 0 créditos no pesan. "
+                "La proyección incluye todos los cursos del ciclo."
+            </p>
+        </div>
+    }
+}
+
+#[component]
+fn FilaCiclo(id: String, resumen: Memo<ResumenCiclo>) -> impl IntoView {
+    let app = expect_context::<Global>();
+    let id = StoredValue::new(id);
+    let fila = Memo::new(move |_| resumen.with(|r| id.with_value(|id| r.cursos.iter().find(|c| &c.id == id).cloned())));
+    let txt = move |f: fn(&NotaCiclo) -> String| move || fila.with(|c| c.as_ref().map(f).unwrap_or_default());
+    let estado = move || {
+        fila.with(|c| match c.as_ref().map(|c| c.estado) {
+            Some(Estado::Aprobado) => "ok",
+            Some(Estado::Desaprobado) => "mal",
+            _ => "juego",
+        })
+    };
+
+    view! {
+        <div class="fila-ciclo" data-estado=estado>
+            <button class="enlace-curso" title="Abrir el curso" on:click=move |_| app.abrir_curso(id.get_value())>
+                <span class="nombre">{txt(|c| c.nombre.clone())}</span>
+                <Icono nombre="flecha" tam=14 />
+            </button>
+            <Numero
+                valor=Signal::derive(move || fila.with(|c| c.as_ref().map(|c| c.creditos)))
+                al_cambiar=Callback::new(move |x: Option<f64>| {
+                    let v = x.unwrap_or(0.0).max(0.0);
+                    let id = id.get_value();
+                    app.editar_donde(|c| c.id == id, |c| c.creditos = v)
+                })
+                clase="creditos"
+                etiqueta=Signal::derive(move || format!("Créditos de {}", fila.with(|c| c.as_ref().map(|c| c.nombre.clone()).unwrap_or_default())))
+            />
+            <span class="der nota-ciclo">{txt(|c| c.nota.map(|n| fmt(n, c.decimales)).unwrap_or_else(|| "sin notas".into()))}</span>
+            <span class="der mono">{txt(|c| c.puntos().map(corto).unwrap_or_else(|| "—".into()))}</span>
+            <span class="centro-t mono tenue col-rango">{txt(|c| format!("{} – {}", fmt(c.minimo, c.decimales), fmt(c.maximo, c.decimales)))}</span>
+            <span>
+                <span class="estado-chip">
+                    {txt(|c| match c.estado {
+                        Estado::Aprobado => "Aprobado".into(),
+                        Estado::Desaprobado => "Jalado".into(),
+                        Estado::EnJuego => "En juego".into(),
+                    })}
+                </span>
+            </span>
+        </div>
     }
 }
 
@@ -363,19 +929,41 @@ fn Editor() -> impl IntoView {
     let texto = move |f: fn(&Curso) -> String| move || curso.with(|c| c.as_ref().map(f).unwrap_or_default());
     let numero = move |f: fn(&Curso) -> f64| Signal::derive(move || curso.with(|c| c.as_ref().map(f)));
 
+    let exportar = move |_| {
+        if let Some(c) = curso.get_untracked() {
+            app.exportar(api::nombre_archivo(&c.nombre, ".esquema.json"), c.esquema().a_json());
+        }
+    };
+    let aplicar = Callback::new(move |t: String| match leer_esquemas(&t) {
+        Err(e) => app.error.set(Some(format!("No se pudo importar: {e}"))),
+        Ok(v) if v.len() != 1 => app.error.set(Some(format!(
+            "El archivo trae {} esquemas. Para aplicarlo a este curso elige uno con un solo esquema, o impórtalo desde la barra lateral para crear un curso por cada uno.",
+            v.len()
+        ))),
+        Ok(mut v) => {
+            let e = v.remove(0);
+            let pregunta = format!(
+                "Las evaluaciones de este curso se reemplazarán por las del esquema «{}». Se borrarán las notas registradas.",
+                e.nombre
+            );
+            app.confirmar("¿Aplicar esquema?", pregunta, "Reemplazar", move || {
+                let e = e.clone();
+                app.editar(|c| c.aplicar_esquema(e));
+                app.aviso.set(Some("Esquema aplicado: créditos, escala, pesos y reglas actualizados.".into()));
+            });
+        }
+    });
+    let ciclo_actual = move || curso.with_untracked(|c| c.as_ref().map(|c| c.periodo.clone()).unwrap_or_default());
+
     let borrar = move |_| {
         let Some(c) = curso.get_untracked() else { return };
-        if !confirmar(&format!("¿Eliminar «{}» y todas sus notas?", c.nombre)) {
-            return;
-        }
-        app.cursos.update(|v| v.retain(|x| x.id != c.id));
-        app.sel.set(app.cursos.with_untracked(|v| v.first().map(|c| c.id.clone())));
-        let error = app.error;
-        spawn_local(async move {
-            if let Err(e) = api::eliminar(&c.id).await {
-                error.set(Some(e));
-            }
-        });
+        let id = c.id.clone();
+        app.confirmar(
+            "¿Eliminar curso?",
+            format!("Se eliminará «{}» con todas sus notas. No se puede deshacer.", c.nombre),
+            "Eliminar",
+            move || app.eliminar_curso(id.clone()),
+        );
     };
 
     view! {
@@ -408,12 +996,27 @@ fn Editor() -> impl IntoView {
                         }
                     }}
                 </span>
+                <div class="acciones-curso">
+                    <button title="Guardar la estructura y configuración del curso (sin notas) en un archivo" on:click=exportar>
+                        <Icono nombre="exportar" tam=14 />
+                        "Exportar esquema"
+                    </button>
+                    <BotonImportar
+                        titulo="Reemplazar las evaluaciones de este curso por las de un esquema (.json)"
+                        al_leer=aplicar
+                    >
+                        <Icono nombre="aplicar" tam=14 />
+                        "Aplicar esquema"
+                    </BotonImportar>
+                </div>
                 </div>
                 <div class="meta">
                     <label>
-                        "Periodo"
+                        "Ciclo"
                         <input
                             class="corto"
+                            list="lista-ciclos"
+                            placeholder="2026-2"
                             prop:value=texto(|c| c.periodo.clone())
                             on:change=move |ev| {
                                 let v = event_target_value(&ev);
@@ -421,6 +1024,20 @@ fn Editor() -> impl IntoView {
                             }
                         />
                     </label>
+                    <datalist id="lista-ciclos">
+                        {move || {
+                            app.cursos
+                                .with(|v| ciclos(v))
+                                .into_iter()
+                                .filter(|c| !c.is_empty())
+                                .map(|c| view! { <option value=c></option> })
+                                .collect_view()
+                        }}
+                    </datalist>
+                    <button class="sutil" title="Ver el promedio ponderado del ciclo" on:click=move |_| app.abrir_ciclo(ciclo_actual())>
+                        <Icono nombre="ciclo" tam=14 />
+                        "Ver ciclo"
+                    </button>
                     <label>
                         "Créditos"
                         <Numero
@@ -969,8 +1586,14 @@ fn Fila(id: Id, nivel: usize) -> impl IntoView {
                         aria-label=rotulo("Eliminar")
                         class="peligro"
                         on:click=move |_| {
-                            let nombre = nombre.get_untracked();
-                            if !grupo || confirmar(&format!("¿Eliminar el grupo «{nombre}» con todo su contenido?")) {
+                            if grupo {
+                                app.confirmar(
+                                    "¿Eliminar grupo?",
+                                    format!("Se eliminará el grupo «{}» con todo su contenido.", nombre.get_untracked()),
+                                    "Eliminar",
+                                    move || app.editar(|c| { c.eliminar(id); }),
+                                );
+                            } else {
                                 app.editar(|c| { c.eliminar(id); });
                             }
                         }

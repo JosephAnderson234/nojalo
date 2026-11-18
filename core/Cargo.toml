@@ -6,6 +6,4 @@ description = "Motor de calificaciones: árbol de notas con pesos, candados y el
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
-
-[dev-dependencies]
 serde_json = "1"

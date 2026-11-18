@@ -56,9 +56,30 @@ fn eliminar_curso(db: State<Db>, id: String) -> Result<(), String> {
         .map_err(texto)
 }
 
+/// Pide dónde guardar con el diálogo nativo y escribe el archivo.
+/// Devuelve `false` si el usuario cancela.
+#[tauri::command]
+async fn exportar_archivo(app: tauri::AppHandle, nombre: String, contenido: String) -> Result<bool, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let Some(ruta) = app
+        .dialog()
+        .file()
+        .set_title("Exportar esquema")
+        .set_file_name(&nombre)
+        .add_filter("Esquema de Nojalo", &["json"])
+        .blocking_save_file()
+    else {
+        return Ok(false);
+    };
+    let ruta = ruta.into_path().map_err(texto)?;
+    std::fs::write(&ruta, contenido).map_err(|e| format!("{}: {e}", ruta.display()))?;
+    Ok(true)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&dir)?;
@@ -67,7 +88,7 @@ pub fn run() {
             app.manage(Db(Mutex::new(con)));
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![listar_cursos, guardar_curso, eliminar_curso])
+        .invoke_handler(tauri::generate_handler![listar_cursos, guardar_curso, eliminar_curso, exportar_archivo])
         .run(tauri::generate_context!())
         .expect("error al iniciar Nojalo");
 }
