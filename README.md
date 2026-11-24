@@ -14,6 +14,8 @@ El mismo crate `nojalo-core` corre en WASM (UI) y en nativo (backend/tests).
 
 Instaladores para Windows y Linux en [Releases](https://github.com/JosephAnderson234/nojalo/releases/latest). No están firmados: en Windows elige *Más información → Ejecutar de todas formas*.
 
+Versión web: [josephanderson234.github.io/nojalo](https://josephanderson234.github.io/nojalo/). Se publica sola con cada push a `main` (workflow `pages.yml`). En la web los datos se guardan en el navegador (localStorage), no se sincronizan con la app de escritorio.
+
 Para publicar una versión: sube `version` en `src-tauri/tauri.conf.json` y empuja un tag `vX.Y.Z`; el workflow `release.yml` compila y publica los instaladores.
 
 ## Modelo
