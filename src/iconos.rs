@@ -1,9 +1,10 @@
 use leptos::prelude::*;
 
-/// Trazos de [Lucide](https://lucide.dev) (ISC), viewBox 24×24.
+/// Trazos de [Lucide](https://lucide.dev) (ISC), viewBox 24×24. El `logo` es propio:
+/// el medidor de la nota con un check (versión de línea de `assets/logo.svg`).
 fn trazos(nombre: &str) -> &'static str {
     match nombre {
-        "logo" => r#"<path d="M21.42 10.922a1 1 0 0 0-.019-1.838L12.83 5.18a2 2 0 0 0-1.66 0L2.6 9.08a1 1 0 0 0 0 1.832l8.57 3.908a2 2 0 0 0 1.66 0z"/><path d="M22 10v6"/><path d="M6 12.5V16a6 3 0 0 0 12 0v-3.5"/>"#,
+        "logo" => r#"<path d="M4.2 17.5A9 9 0 1 1 19.8 17.5"/><path d="m8.5 13.5 2.5 2.5 4.5-5"/>"#,
         "candado" => r#"<rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>"#,
         "ajustes" => r#"<line x1="21" x2="14" y1="4" y2="4"/><line x1="10" x2="3" y1="4" y2="4"/><line x1="21" x2="12" y1="12" y2="12"/><line x1="8" x2="3" y1="12" y2="12"/><line x1="21" x2="16" y1="20" y2="20"/><line x1="12" x2="3" y1="20" y2="20"/><line x1="14" x2="14" y1="2" y2="6"/><line x1="8" x2="8" y1="10" y2="14"/><line x1="16" x2="16" y1="18" y2="22"/>"#,
         "subir" => r#"<path d="m5 12 7-7 7 7"/><path d="M12 19V5"/>"#,
