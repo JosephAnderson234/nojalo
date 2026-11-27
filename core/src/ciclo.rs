@@ -136,7 +136,7 @@ pub fn ciclo_siguiente(existentes: &[String], actual: &str) -> String {
         .unwrap_or_else(|| actual.to_string());
     let mut nombre = base.clone();
     let mut i = 2;
-    while existentes.iter().any(|c| *c == nombre) {
+    while existentes.contains(&nombre) {
         nombre = format!("{base} ({i})");
         i += 1;
     }

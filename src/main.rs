@@ -1,6 +1,10 @@
 mod api;
 mod app;
+mod componentes;
+mod estado;
+mod formato;
 mod iconos;
+mod vistas;
 
 fn main() {
     console_error_panic_hook::set_once();
