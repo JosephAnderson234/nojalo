@@ -1,11 +1,19 @@
-# Nojalo
+<p align="center">
+  <img src="assets/logo.svg" alt="Logo de Nojalo: un medidor de nota que pasa la marca aprobatoria, con un check" width="128" height="128">
+</p>
 
-> ¿Cuánto necesito en el final para no jalar el curso?
+<h1 align="center">Nojalo</h1>
+
+<p align="center"><em>¿Cuánto necesito en el final para no jalar el curso?</em></p>
 
 App de escritorio para registrar calificaciones, escrita **toda en Rust**:
 
 - **`core/`**: el motor de notas. Es Rust puro, sin dependencias de UI y con tests.
 - **`src/`**: la UI en [Leptos](https://leptos.dev) (reactividad fina), compilada a WebAssembly con [Trunk](https://trunkrs.dev).
+  - `estado.rs`: estado global (señales) y las operaciones que lo cambian y persisten.
+  - `api/`: persistencia; `tauri.rs` (SQLite vía comandos) y `navegador.rs` (localStorage).
+  - `vistas/`: barra lateral, bienvenida, ciclo y editor de curso (`curso/`: resumen y árbol).
+  - `componentes/`: piezas reutilizables (campo numérico, diálogo, avisos, importar).
 - **`src-tauri/`**: el shell de escritorio en [Tauri 2](https://tauri.app). Guarda los cursos en SQLite.
 
 El mismo crate `nojalo-core` corre en WASM (UI) y en nativo (backend/tests).
